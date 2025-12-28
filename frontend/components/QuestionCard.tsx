@@ -37,7 +37,7 @@ const QuestionCard: React.FC<QuestionCardProps> = ({ question, isGenerating }) =
       </div>
       <h2 className="text-sm font-bold text-accent uppercase tracking-wide mb-2">{question.topic}</h2>
       <h1 className="text-2xl font-bold text-slate-800 leading-relaxed">
-        {question.text}
+       {question.text || (question as any).question || "Waiting for question..."}
       </h1>
     </div>
   );

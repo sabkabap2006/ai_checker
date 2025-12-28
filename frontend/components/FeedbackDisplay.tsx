@@ -6,6 +6,10 @@ interface FeedbackDisplayProps {
 }
 
 const FeedbackDisplay: React.FC<FeedbackDisplayProps> = ({ evaluation }) => {
+  // Safety checks: Ensure arrays exist, fallback to empty arrays if undefined
+  const spellingErrors = evaluation.spellingErrors || [];
+  const missingConcepts = evaluation.keyConceptsMissed || [];
+
   const scoreColor = 
     evaluation.score >= 80 ? 'text-green-600' : 
     evaluation.score >= 50 ? 'text-yellow-600' : 'text-red-600';
@@ -34,15 +38,16 @@ const FeedbackDisplay: React.FC<FeedbackDisplayProps> = ({ evaluation }) => {
         {/* Spelling & Grammar */}
         <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
             <h4 className="font-semibold text-slate-700 mb-3 flex items-center">
+                {/* Note: Ensure FontAwesome is loaded or replace with react-icons */}
                 <i className="fas fa-spell-check text-blue-500 mr-2"></i> Spelling & Grammar
             </h4>
-            {evaluation.spellingErrors.length === 0 ? (
+            {spellingErrors.length === 0 ? (
                 <p className="text-sm text-gray-600 flex items-center">
                     <i className="fas fa-check-circle text-green-500 mr-2"></i> No errors found.
                 </p>
             ) : (
                 <ul className="list-disc list-inside text-sm text-red-600 space-y-1">
-                    {evaluation.spellingErrors.map((err, idx) => (
+                    {spellingErrors.map((err, idx) => (
                         <li key={idx}>{err}</li>
                     ))}
                 </ul>
@@ -54,13 +59,13 @@ const FeedbackDisplay: React.FC<FeedbackDisplayProps> = ({ evaluation }) => {
             <h4 className="font-semibold text-slate-700 mb-3 flex items-center">
                 <i className="fas fa-lightbulb text-yellow-500 mr-2"></i> Missing Concepts
             </h4>
-            {evaluation.keyConceptsMissed.length === 0 ? (
+            {missingConcepts.length === 0 ? (
                 <p className="text-sm text-gray-600 flex items-center">
                     <i className="fas fa-check-circle text-green-500 mr-2"></i> You covered all key points.
                 </p>
             ) : (
                 <ul className="list-disc list-inside text-sm text-gray-600 space-y-1">
-                    {evaluation.keyConceptsMissed.map((concept, idx) => (
+                    {missingConcepts.map((concept, idx) => (
                         <li key={idx}>{concept}</li>
                     ))}
                 </ul>
@@ -71,15 +76,18 @@ const FeedbackDisplay: React.FC<FeedbackDisplayProps> = ({ evaluation }) => {
       {/* Technical Feedback */}
       <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
         <h4 className="font-semibold text-slate-700 mb-2">Technical Analysis</h4>
-        <p className="text-sm text-gray-600 leading-relaxed">{evaluation.technicalAccuracy}</p>
+        <p className="text-sm text-gray-600 leading-relaxed whitespace-pre-wrap">
+          {evaluation.technicalAccuracy}
+        </p>
       </div>
 
       {/* Improved Answer */}
       <div className="bg-slate-50 p-6 rounded-xl border border-slate-200">
         <h4 className="font-semibold text-slate-800 mb-2">Model Answer</h4>
-        <p className="text-sm text-slate-700 font-mono leading-relaxed bg-white p-4 rounded border border-slate-200">
+        {/* Changed from <p> to <div> and added whitespace-pre-wrap to preserve formatting */}
+        <div className="text-sm text-slate-700 leading-relaxed bg-white p-4 rounded border border-slate-200 whitespace-pre-wrap font-sans">
           {evaluation.improvedAnswer}
-        </p>
+        </div>
       </div>
     </div>
   );

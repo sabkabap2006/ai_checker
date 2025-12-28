@@ -4,18 +4,17 @@ import time
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask_pymongo import PyMongo
-from bson.objectid import ObjectId
 from dotenv import load_dotenv
-import google.generativeai as genai
 
-# 1. Load environment variables
+# Import helper
+from geminiapi import generate_response
+
 load_dotenv()
 
 app = Flask(__name__)
 CORS(app) 
 
-# 2. CONFIGURATION FIX
-# We check for the environment variable. If it's missing, we default to localhost.
+# Database Configuration
 uri = os.getenv("MONGO_URI")
 if not uri:
     print("⚠️  .env not found or MONGO_URI missing. Using default localhost.")
@@ -24,15 +23,6 @@ if not uri:
 app.config["MONGO_URI"] = uri
 mongo = PyMongo(app)
 
-# 3. Configure Gemini
-api_key = os.getenv("GEMINI_API_KEY")
-if not api_key:
-    print("❌ ERROR: GEMINI_API_KEY is missing from .env file!")
-else:
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel('gemini-2.0-flash')
-
-# --- Helper: Current Timestamp (ms) ---
 def get_timestamp():
     return int(time.time() * 1000)
 
@@ -43,23 +33,38 @@ def generate_question():
     topic = data.get('topic', 'Software Engineering')
 
     try:
-        prompt = f"""
-        Generate a single technical interview question about "{topic}".
-        Return ONLY a JSON object with these exact keys:
-        - "text": The question content.
-        - "difficulty": One of ["Beginner", "Intermediate", "Advanced"].
-        - "topic": "{topic}"
-        """
+        # We only need to send the topic. geminiapi handles the randomization/styles.
+        input_data = {
+            "topic": topic
+        }
+
+        print(f"Generating NEW unique question for topic: {topic}")
         
-        response = model.generate_content(prompt)
-        clean_text = response.text.strip().replace('```json', '').replace('```', '')
-        question_data = json.loads(clean_text)
+        json_string = generate_response(data=input_data, num=1)
+        generated_list = json.loads(json_string)
+
+        if not generated_list:
+             # Fallback if AI fails (keeps app alive)
+             generated_list = [{
+                 "text": f"Explain the core concepts of {topic}.", 
+                 "difficulty": "Intermediate", 
+                 "topic": topic
+             }]
+
+        question_data = generated_list[0]
         
+        # Fix missing 'text' field if AI names it 'question'
+        if 'text' not in question_data:
+            question_data['text'] = question_data.get('question', 'Question text missing')
+
+        # Add Metadata
+        question_data['topic'] = topic
         question_data['timestamp'] = get_timestamp()
         
+        # Save to DB
         result = mongo.db.questions.insert_one(question_data)
         question_data['id'] = str(result.inserted_id)
-        del question_data['_id']
+        if '_id' in question_data: del question_data['_id']
         
         return jsonify(question_data), 200
 
@@ -78,24 +83,31 @@ def evaluate_answer():
         return jsonify({"error": "Missing data"}), 400
 
     try:
-        prompt = f"""
-        You are a senior technical interviewer.
-        Question: "{question_obj.get('text')}"
-        Candidate Answer: "{user_answer}"
-        
-        Evaluate this answer rigorously. Return ONLY a JSON object with these keys:
-        - "score": number (0-100).
-        - "spellingErrors": array of strings (list any typos, or empty array).
-        - "technicalAccuracy": string (brief comment on technical correctness).
-        - "improvedAnswer": string (a concise, ideal answer).
-        - "keyConceptsMissed": array of strings (list concepts the candidate missed).
-        - "isCorrect": boolean.
+        # Define the Evaluation Prompt
+        eval_prompt = f"""
+            You are a technical interviewer.
+            Question: "{question_obj.get('text')}"
+            Candidate Answer: "{user_answer}"
+            
+            Evaluate this answer. Return a JSON object with strictly these keys:
+            - "score": number (0-100)
+            - "spellingErrors": list of strings (typos)
+            - "technicalAccuracy": string (brief comment)
+            - "improvedAnswer": string (better version)
+            - "keyConceptsMissed": list of strings
+            - "isCorrect": boolean
         """
-        
-        response = model.generate_content(prompt)
-        clean_text = response.text.strip().replace('```json', '').replace('```', '')
-        evaluation_data = json.loads(clean_text)
 
+        # Send as 'custom_prompt' to trigger Evaluation Mode in geminiapi
+        input_data = {
+            "custom_prompt": eval_prompt
+        }
+
+        json_string = generate_response(data=input_data, num=1)
+        generated_list = json.loads(json_string)
+        evaluation_data = generated_list[0] if generated_list else {}
+
+        # Save Attempt
         attempt_record = {
             "question": question_obj,
             "userAnswer": user_answer,
@@ -105,7 +117,7 @@ def evaluate_answer():
 
         result = mongo.db.attempts.insert_one(attempt_record)
         attempt_record['id'] = str(result.inserted_id)
-        del attempt_record['_id']
+        if '_id' in attempt_record: del attempt_record['_id']
 
         return jsonify(attempt_record), 200
 
@@ -129,4 +141,5 @@ def check_history():
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
+    # Kept port 5001 as requested
     app.run(debug=True, port=5001)

@@ -33,7 +33,7 @@ const QuestionCard: React.FC<QuestionCardProps> = ({ question, isGenerating }) =
         <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getDifficultyColor(question.difficulty)}`}>
           {question.difficulty}
         </span>
-        <span className="text-xs text-gray-500 font-mono">ID: {question.id.slice(0, 8)}</span>
+        {/* <span className="text-xs text-gray-500 font-mono">ID: {question.id.slice(0, 8)}</span> */}
       </div>
       <h2 className="text-sm font-bold text-accent uppercase tracking-wide mb-2">{question.topic}</h2>
       <h1 className="text-2xl font-bold text-slate-800 leading-relaxed">

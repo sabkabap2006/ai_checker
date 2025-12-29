@@ -5,6 +5,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask_pymongo import PyMongo
 from dotenv import load_dotenv
+from bson import ObjectId
 
 # Import helper
 from geminiapi import generate_response
@@ -17,7 +18,7 @@ CORS(app)
 # Database Configuration
 uri = os.getenv("MONGO_URI")
 if not uri:
-    print("⚠️  .env not found or MONGO_URI missing. Using default localhost.")
+    # Use localhost if .env is missing
     uri = "mongodb://localhost:27017/ai_checker_db"
 
 app.config["MONGO_URI"] = uri
@@ -26,6 +27,15 @@ mongo = PyMongo(app)
 def get_timestamp():
     return int(time.time() * 1000)
 
+def serialize_doc(doc):
+    """Helper to convert MongoDB ObjectIds to strings for JSON"""
+    if not doc: return None
+    # FIX: Check if _id exists before trying to convert it
+    if '_id' in doc:
+        doc['id'] = str(doc['_id'])
+        del doc['_id']
+    return doc
+
 # --- 1. GENERATE Endpoint ---
 @app.route('/api/generate', methods=['POST'])
 def generate_question():
@@ -33,18 +43,14 @@ def generate_question():
     topic = data.get('topic', 'Software Engineering')
 
     try:
-        # We only need to send the topic. geminiapi handles the randomization/styles.
-        input_data = {
-            "topic": topic
-        }
-
+        input_data = { "topic": topic }
         print(f"Generating NEW unique question for topic: {topic}")
         
+        # Call Gemini via your helper
         json_string = generate_response(data=input_data, num=1)
         generated_list = json.loads(json_string)
 
         if not generated_list:
-             # Fallback if AI fails (keeps app alive)
              generated_list = [{
                  "text": f"Explain the core concepts of {topic}.", 
                  "difficulty": "Intermediate", 
@@ -53,24 +59,26 @@ def generate_question():
 
         question_data = generated_list[0]
         
-        # Fix missing 'text' field if AI names it 'question'
+        # Normalize fields
         if 'text' not in question_data:
             question_data['text'] = question_data.get('question', 'Question text missing')
 
-        # Add Metadata
         question_data['topic'] = topic
         question_data['timestamp'] = get_timestamp()
         
-        # Save to DB
-        result = mongo.db.questions.insert_one(question_data)
-        question_data['id'] = str(result.inserted_id)
-        if '_id' in question_data: del question_data['_id']
+        # FIX IS HERE: Remove .copy() so 'question_data' receives the new _id from Mongo
+        mongo.db.questions.insert_one(question_data)
         
-        return jsonify(question_data), 200
+        # Now serialize_doc will find the _id
+        return jsonify(serialize_doc(question_data)), 200
 
     except Exception as e:
         print(f"Generate Error: {e}")
+        # Print the full traceback in console to debug
+        import traceback
+        traceback.print_exc()
         return jsonify({"error": str(e)}), 500
+
 
 # --- 2. EVALUATE Endpoint ---
 @app.route('/api/evaluate', methods=['POST'])
@@ -83,7 +91,6 @@ def evaluate_answer():
         return jsonify({"error": "Missing data"}), 400
 
     try:
-        # Define the Evaluation Prompt
         eval_prompt = f"""
             You are a technical interviewer.
             Question: "{question_obj.get('text')}"
@@ -91,55 +98,62 @@ def evaluate_answer():
             
             Evaluate this answer. Return a JSON object with strictly these keys:
             - "score": number (0-100)
-            - "spellingErrors": list of strings (typos)
-            - "technicalAccuracy": string (brief comment)
-            - "improvedAnswer": string (better version)
-            - "keyConceptsMissed": list of strings
             - "isCorrect": boolean
+            - "spellingErrors": list of strings (typos)
+            - "keyConceptsMissed": list of strings (important missing technical details)
+            - "technicalAccuracy": string (brief analytical comment)
+            - "improvedAnswer": string (a better, more complete version of the answer)
         """
 
-        # Send as 'custom_prompt' to trigger Evaluation Mode in geminiapi
-        input_data = {
-            "custom_prompt": eval_prompt
-        }
+        input_data = { "custom_prompt": eval_prompt }
 
+        # Call Gemini
         json_string = generate_response(data=input_data, num=1)
         generated_list = json.loads(json_string)
         evaluation_data = generated_list[0] if generated_list else {}
 
-        # Save Attempt
-        attempt_record = {
-            "question": question_obj,
-            "userAnswer": user_answer,
-            "evaluation": evaluation_data,
-            "timestamp": get_timestamp()
-        }
-
-        result = mongo.db.attempts.insert_one(attempt_record)
-        attempt_record['id'] = str(result.inserted_id)
-        if '_id' in attempt_record: del attempt_record['_id']
-
-        return jsonify(attempt_record), 200
+        return jsonify(evaluation_data), 200
 
     except Exception as e:
         print(f"Evaluate Error: {e}")
         return jsonify({"error": str(e)}), 500
 
-# --- 3. CHECK HISTORY Endpoint ---
-@app.route('/api/check', methods=['GET'])
-def check_history():
+
+# --- 3. ATTEMPTS Endpoint (History) ---
+@app.route('/api/attempts', methods=['GET', 'POST'])
+def handle_attempts():
     try:
-        cursor = mongo.db.attempts.find().sort("timestamp", -1).limit(10)
-        history = []
-        for doc in cursor:
-            doc['id'] = str(doc['_id'])
-            del doc['_id']
-            history.append(doc)
-            
-        return jsonify({"history": history}), 200
+        if request.method == 'GET':
+            cursor = mongo.db.attempts.find().sort("timestamp", -1)
+            history = [serialize_doc(doc) for doc in cursor]
+            return jsonify(history), 200
+
+        elif request.method == 'POST':
+            data = request.json
+            if '_id' in data: 
+                del data['_id']
+            mongo.db.attempts.insert_one(data)
+            return jsonify({"message": "Saved successfully"}), 201
+
     except Exception as e:
+        print(f"History Error: {e}")
         return jsonify({"error": str(e)}), 500
 
+# --- 4. FEEDBACK Endpoint ---
+@app.route('/api/feedback', methods=['POST'])
+def save_feedback():
+    try:
+        data = request.json
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+        
+        mongo.db.feedback.insert_one(data)
+        return jsonify({"message": "Feedback received"}), 201
+    except Exception as e:
+        print(f"Feedback Error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 if __name__ == '__main__':
-    # Kept port 5001 as requested
+    print("🚀 Server running on http://localhost:5001")
     app.run(debug=True, port=5001)

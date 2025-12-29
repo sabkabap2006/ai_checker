@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { UserFeedback } from '../types';
-import { mockBackend } from '../services/storageService';
+// DELETED: import { mockBackend } from '../services/storageService';
 
 interface FeedbackFormProps {
   attemptId: string;
@@ -18,6 +18,7 @@ const FeedbackForm: React.FC<FeedbackFormProps> = ({ attemptId }) => {
     if (rating === 0) return;
 
     setIsSubmitting(true);
+    
     const feedback: UserFeedback = {
       id: crypto.randomUUID(),
       attemptId,
@@ -27,10 +28,23 @@ const FeedbackForm: React.FC<FeedbackFormProps> = ({ attemptId }) => {
     };
 
     try {
-      await mockBackend.saveFeedback(feedback);
+      // CHANGED: Send to Python Backend instead of mockBackend
+      const response = await fetch('http://localhost:5001/api/feedback', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(feedback),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to submit feedback');
+      }
+
       setIsSubmitted(true);
     } catch (error) {
       console.error("Failed to submit feedback", error);
+      alert("Error submitting feedback. Ensure backend is running.");
     } finally {
       setIsSubmitting(false);
     }

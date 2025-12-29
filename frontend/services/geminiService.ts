@@ -1,21 +1,13 @@
-import { Question, Attempt } from '../types';
+import { Question, Attempt, EvaluationResult } from '../types';
 
-// Ensure this matches your backend port (5001)
+// Ensure this matches your Python Backend URL and Port
 const API_URL = 'http://localhost:5001/api';
 
-/**
- * Generates a new question by calling the Python Backend.
- * The backend handles the AI Schema validation and Randomness.
- */
 export const generateNewQuestion = async (topic: string): Promise<Question> => {
   try {
-    // We add 't' (timestamp) to prevent browser caching
     const response = await fetch(`${API_URL}/generate?t=${Date.now()}`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Cache-Control': 'no-cache'
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ topic }),
     });
 
@@ -26,7 +18,6 @@ export const generateNewQuestion = async (topic: string): Promise<Question> => {
 
     const data = await response.json();
     
-    // Safety check: Ensure the backend actually returned the text field
     if (!data.text && !data.question) {
       throw new Error("Received empty question from backend");
     }
@@ -38,47 +29,59 @@ export const generateNewQuestion = async (topic: string): Promise<Question> => {
   }
 };
 
-/**
- * Sends the user's answer to the backend for evaluation.
- * Returns a detailed score, feedback, and corrections.
- */
 export const evaluateSubmission = async (question: Question, answer: string): Promise<Attempt> => {
   try {
-    const response = await fetch(`${API_URL}/evaluate`, {
+    // Step 1: Get AI Evaluation
+    const evalResponse = await fetch(`${API_URL}/evaluate`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ 
         question: question, 
         user_answer: answer 
       }),
     });
 
-    if (!response.ok) {
-      throw new Error(`Backend error: ${response.statusText}`);
+    if (!evalResponse.ok) {
+      throw new Error(`Evaluation failed: ${evalResponse.statusText}`);
     }
 
-    return await response.json();
+    const evaluationData: EvaluationResult = await evalResponse.json();
+
+    // Step 2: Construct the Full Attempt Object
+    const newAttempt: Attempt = {
+        id: crypto.randomUUID(),
+        // FIX IS HERE: Use Date.now() to return a number, not a string/Date
+        timestamp: Date.now(), 
+        question: question,
+        userAnswer: answer,
+        evaluation: evaluationData
+    };
+
+    // Step 3: Save to MongoDB
+    const saveResponse = await fetch(`${API_URL}/attempts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newAttempt)
+    });
+
+    if (!saveResponse.ok) {
+        console.warn("Warning: Failed to save attempt to history database.");
+    }
+
+    return newAttempt;
+
   } catch (error) {
-    console.error("Error evaluating:", error);
+    console.error("Error in evaluateSubmission:", error);
     throw error;
   }
 };
 
-/**
- * Fetches past interview history from MongoDB via the Backend.
- */
 export const fetchHistory = async (): Promise<Attempt[]> => {
   try {
-    const response = await fetch(`${API_URL}/check`);
-    
-    if (!response.ok) {
-      throw new Error("Failed to fetch history");
-    }
-
+    const response = await fetch(`${API_URL}/attempts`);
+    if (!response.ok) throw new Error("Failed to fetch history");
     const data = await response.json();
-    return data.history || []; // Backend returns { history: [...] }
+    return data; 
   } catch (error) {
     console.error("Error fetching history:", error);
     return [];

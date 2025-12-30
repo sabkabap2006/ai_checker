@@ -15,7 +15,7 @@ def generate_response(data=None, num=1):
     if data is None: data = {}
     
     # Use a stable model. Switch to 'gemini-2.0-flash-exp' if you have access.
-    model_name ="gemini-3-flash-preview"
+    model_name ="gemini-2.5-flash-lite"
     
     # --- 1. DETERMINE MODE & DEFINE SCHEMA ---
     

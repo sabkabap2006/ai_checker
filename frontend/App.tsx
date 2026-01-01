@@ -14,7 +14,7 @@ const App: React.FC = () => {
   const [refreshHistoryTrigger, setRefreshHistoryTrigger] = useState(0);
   const [status, setStatus] = useState<Status>(Status.IDLE);
   
-  // Default topic set to React JS (will be used for the auto-load)
+  // Default topic set to React JS
   const [topic, setTopic] = useState('React JS');
   
   // UI States
@@ -48,10 +48,35 @@ const App: React.FC = () => {
     }
   }, [topic]);
 
-  // --- NEW: AUTO-GENERATE ON LOAD ---
+  // --- UPDATED: RESTORE SESSION ON LOAD ---
   useEffect(() => {
-    // This runs exactly once when the page loads/reloads
-    handleGenerateQuestion();
+    const initializeSession = async () => {
+      try {
+        // 1. Try to fetch the existing question from DB first
+        const latestQuestion = await GeminiService.getLatestQuestion();
+        
+        if (latestQuestion) {
+          console.log("Restoring previous session question...");
+          setCurrentQuestion(latestQuestion);
+          
+          // Update the topic input to match the restored question
+          if (latestQuestion.topic) {
+            setTopic(latestQuestion.topic);
+          }
+          
+          setStatus(Status.SUCCESS);
+        } else {
+          // 2. If DB is empty, generate a fresh question
+          console.log("No existing question found. Generating new...");
+          handleGenerateQuestion();
+        }
+      } catch (error) {
+        console.error("Failed to restore session, generating new...", error);
+        handleGenerateQuestion();
+      }
+    };
+
+    initializeSession();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); 
 

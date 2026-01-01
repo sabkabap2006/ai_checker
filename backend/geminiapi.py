@@ -14,16 +14,22 @@ def generate_response(data=None, num=1):
     """
     if data is None: data = {}
     
-    # Use a stable model. Switch to 'gemini-2.0-flash-exp' if you have access.
-    model_name ="gemini-2.5-flash-lite"
+    # ✅ USE A STABLE MODEL
+    # 'gemini-1.5-flash' is the safest, fastest choice for free tier.
+    # You can try 'gemini-2.0-flash' if your API key supports it.
+    model_name = "gemini-3-pro-preview"
     
+    prompt = data.get("custom_prompt", "")
+    topic = data.get("topic", "General")
+
     # --- 1. DETERMINE MODE & DEFINE SCHEMA ---
     
-    # CASE A: EVALUATION MODE (Grading an answer)
-    if "custom_prompt" in data:
-        prompt = data["custom_prompt"]
-        
-        # Define strict schema for grading
+    # We check the prompt text to decide which Schema to enforce.
+    # If the prompt contains "Evaluate", we use the Grading Schema.
+    is_evaluation = "Evaluate" in prompt or "score" in prompt
+
+    if is_evaluation:
+        # CASE A: EVALUATION MODE
         schema = {
             "type": "object",
             "properties": {
@@ -36,22 +42,20 @@ def generate_response(data=None, num=1):
             },
             "required": ["score", "technicalAccuracy", "improvedAnswer", "isCorrect"]
         }
-
-    # CASE B: GENERATION MODE (Creating questions)
     else:
-        topic = data.get("topic", "Software Engineering")
+        # CASE B: GENERATION MODE
+        # If no custom prompt was passed, build one
+        if not prompt:
+            styles = ["conceptual", "debugging", "system design", "best practices"]
+            chosen_style = random.choice(styles)
+            seed = random.randint(1, 100000)
+            
+            prompt = (
+                f"Generate {num} unique technical interview question(s) about {topic}. "
+                f"Focus on a {chosen_style} aspect. Random Seed: {seed}"
+            )
         
-        # Add randomness to prompt to prevent repetitive questions
-        styles = ["conceptual", "debugging", "system design", "best practices"]
-        chosen_style = random.choice(styles)
-        seed = random.randint(1, 100000)
-        
-        prompt = (
-            f"Generate {num} unique technical interview question(s) about {topic}. "
-            f"Focus on a {chosen_style} aspect. Random Seed: {seed}"
-        )
-        
-        # Define strict schema for a LIST of questions
+        # Schema for a LIST of questions
         schema = {
             "type": "array",
             "items": {
@@ -74,7 +78,7 @@ def generate_response(data=None, num=1):
             generation_config=genai.types.GenerationConfig(
                 response_mime_type="application/json", # Forces JSON output
                 response_schema=schema,                # Forces specific structure
-                temperature=0.7 
+                temperature=0.8 
             )
         )
 
@@ -82,15 +86,15 @@ def generate_response(data=None, num=1):
         parsed_json = json.loads(result_text)
 
         # --- 3. FORMATTING FIX FOR APP.PY ---
-        # app.py expects a list (it calls result[0]). 
-        # Evaluation mode returns a dict. We must wrap it.
+        # app.py expects a list.
+        # If we got a single object (Evaluation), wrap it in a list.
         if isinstance(parsed_json, dict):
             return json.dumps([parsed_json])
             
-        # Generation mode is already a list.
+        # If we got a list (Questions), return as is.
         return result_text
 
     except Exception as e:
         print(f"❌ Gemini API Error: {e}")
-        # Return an empty list string so app.py doesn't crash on json.loads()
+        # Return an empty list string so app.py doesn't crash
         return "[]"
